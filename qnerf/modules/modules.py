@@ -76,9 +76,9 @@ class HybridLayer(nn.Module):
         self.qlayer = QuantumLayer(out_features, spectrum_layer, use_noise)
 
     def forward(self, x):
-        print(f"HybridLayer {self.idx} input shape: {x.shape}")
+        #print(f"HybridLayer {self.idx} input shape: {x.shape}")
         x1 = self.clayer(x)
-        print(f"HybridLayer {self.idx} after clayer shape: {x1.shape}")
+        #print(f"HybridLayer {self.idx} after clayer shape: {x1.shape}")
         # x1 = self.norm(x1.permute(0, 2, 1)).permute(0, 2, 1)
         x1 = self.norm(x1)
         out = self.qlayer(x1)

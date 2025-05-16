@@ -49,7 +49,7 @@ class QuantumNerfField(Field):
         num_layers: int = 2,
         spectrum_layers: int = 3,
         hidden_dim: int = 8,
-        geo_feat_dim: int = 4, # TODO: No idea if this is correct
+        geo_feat_dim: int = 3, # TODO: No idea if this is correct
         num_layers_color: int = 3,
         spectrum_layers_color: int = 3,
         hidden_dim_color: int = 8,
@@ -57,6 +57,7 @@ class QuantumNerfField(Field):
         appearance_embedding_dim: int = 32,
         use_average_appearance_embedding: bool = False,
 
+        average_init_density: float = 1.0,
         spatial_distortion: Optional[SpatialDistortion] = None
     ) -> None:
         super().__init__()
@@ -72,6 +73,7 @@ class QuantumNerfField(Field):
         else:
             self.embedding_appearance = None
         self.use_average_appearance_embedding = use_average_appearance_embedding
+        self.average_init_density = average_init_density
 
         self.mlp_base = Hybridren(
             in_features=3, # TODO: No idea if this is correct
@@ -122,7 +124,7 @@ class QuantumNerfField(Field):
         positions_flat = positions.view(-1, 3)
 
         assert positions_flat.numel() > 0, "No positions to sample"
-        h = self.mlp_base(positions_flat).view(*ray_samples.frustums.shape, -1)
+        h = self.mlp_base(positions_flat)[0].view(*ray_samples.frustums.shape, -1)
         density_before_activation, base_mlp_out = torch.split(h, [1, self.geo_feat_dim], dim=-1)
         self._density_after_activation = density_before_activation
 
@@ -161,6 +163,8 @@ class QuantumNerfField(Field):
                         (*directions.shape[:-1], self.appearance_embedding_dim), device=directions.device
                     )
 
+        #print(f"Density shape: {density_embedding.shape}")
+        #print(f"Directions flat shape: {directions_flat.shape}")
         h = torch.cat(
             [
                 directions_flat,
@@ -169,8 +173,9 @@ class QuantumNerfField(Field):
             + (
                 [embedded_appearance.view(-1, self.appearance_embedding_dim)] if embedded_appearance is not None else []
             ),
+            dim=1
         )
-        rgb = self.mlp_head(h).view(*outputs_shape, -1).to(directions)
+        rgb = self.mlp_head(h)[0].view(*outputs_shape, -1).to(directions)
         outputs.update({FieldHeadNames.RGB: rgb})
 
         return outputs
