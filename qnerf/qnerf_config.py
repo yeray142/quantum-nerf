@@ -6,13 +6,9 @@ Define your custom method here that registers with Nerfstudio CLI.
 
 from __future__ import annotations
 
-from method_template.template_datamanager import (
-    TemplateDataManagerConfig,
-)
-from method_template.template_model import TemplateModelConfig
-from method_template.template_pipeline import (
-    TemplatePipelineConfig,
-)
+from nerfstudio.data.datamanagers.base_datamanager import VanillaDataManagerConfig
+from nerfstudio.pipelines.base_pipeline import VanillaPipelineConfig
+
 from nerfstudio.configs.base_config import ViewerConfig
 from nerfstudio.data.dataparsers.nerfstudio_dataparser import NerfstudioDataParserConfig
 from nerfstudio.engine.optimizers import AdamOptimizerConfig, RAdamOptimizerConfig
@@ -22,23 +18,26 @@ from nerfstudio.engine.schedulers import (
 from nerfstudio.engine.trainer import TrainerConfig
 from nerfstudio.plugins.types import MethodSpecification
 
+from qnerf.qnerf import QNerfModelConfig
 
-method_template = MethodSpecification(
+qnerf_method = MethodSpecification(
     config=TrainerConfig(
-        method_name="method-template",  # TODO: rename to your own model
+        method_name="qnerf",  # TODO: rename model
         steps_per_eval_batch=500,
         steps_per_save=2000,
         max_num_iterations=30000,
         mixed_precision=True,
-        pipeline=TemplatePipelineConfig(
-            datamanager=TemplateDataManagerConfig(
+        pipeline=VanillaPipelineConfig(
+            datamanager=VanillaDataManagerConfig(
                 dataparser=NerfstudioDataParserConfig(),
                 train_num_rays_per_batch=4096,
                 eval_num_rays_per_batch=4096,
             ),
-            model=TemplateModelConfig(
-                eval_num_rays_per_chunk=1 << 15,
-                average_init_density=0.01,
+            model=QNerfModelConfig(
+                hidden_dim = 8,
+                hidden_dim_color = 8,
+                use_appearance_embedding = False,
+                appearance_embed_dim = 32
             ),
         ),
         optimizers={
@@ -59,5 +58,5 @@ method_template = MethodSpecification(
         viewer=ViewerConfig(num_rays_per_chunk=1 << 15),
         vis="viewer",
     ),
-    description="Nerfstudio method template.",
+    description="Quantum Nerf method",
 )
