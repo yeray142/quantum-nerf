@@ -63,7 +63,13 @@ class QuantumLayer(nn.Module):
         orgin_shape = list(x.shape[0:-1]) + [-1]
         if len(orgin_shape) > 2:
             x = x.reshape((-1, self.in_features))
-        out = self.qnn(x)
+        
+        org_type = x.dtype
+        x_fp32 = x.to(torch.float32)
+        out = self.qnn(x_fp32)
+        if org_type != out.dtype:
+            out = out.to(org_type)
+        
         return out.reshape(orgin_shape)
 
 

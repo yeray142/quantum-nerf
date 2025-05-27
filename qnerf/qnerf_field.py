@@ -11,12 +11,15 @@ from nerfstudio.cameras.rays import RaySamples
 from nerfstudio.data.scene_box import SceneBox
 
 import torch
+import torch.nn as nn
 from nerfstudio.field_components.field_heads import FieldHeadNames
 from torch import Tensor
 from torch.nn import Embedding
 
+from nerfstudio.field_components.mlp import MLPWithHashEncoding, MLP
 from nerfstudio.field_components.activations import trunc_exp
 from nerfstudio.field_components.spatial_distortions import SpatialDistortion
+from nerfstudio.field_components.encodings import NeRFEncoding, SHEncoding
 from nerfstudio.fields.base_field import Field, get_normalized_directions  # for custom Field
 
 from qnerf.modules.modules import Hybridren
@@ -46,14 +49,15 @@ class QuantumNerfField(Field):
         self,
         aabb: Tensor,
         num_images: int,
-        num_layers: int = 2,
-        spectrum_layers: int = 3,
+        num_layers: int = 2, # TODO: 3 for quantum, 2 for classical
+        spectrum_layers: int = 4,
         hidden_dim: int = 8,
-        geo_feat_dim: int = 3, # TODO: No idea if this is correct
+        geo_feat_dim: int = 5,
         num_layers_color: int = 3,
-        spectrum_layers_color: int = 3,
+        spectrum_layers_color: int = 4,
         hidden_dim_color: int = 8,
 
+        # TODO: Appearance embedding NOT used here.
         appearance_embedding_dim: int = 32,
         use_average_appearance_embedding: bool = False,
 
@@ -74,15 +78,29 @@ class QuantumNerfField(Field):
             self.embedding_appearance = None
         self.use_average_appearance_embedding = use_average_appearance_embedding
         self.average_init_density = average_init_density
+        self.step = 0
 
-        self.mlp_base = Hybridren(
-            in_features=3, # TODO: No idea if this is correct
-            hidden_features=hidden_dim,
-            hidden_layers=num_layers,
-            out_features=1 + self.geo_feat_dim,
-            spectrum_layer=spectrum_layers,
-            use_noise=False,
-            outermost_linear=True,
+        #self.mlp_base = Hybridren(
+        #    in_features=3,
+        #    hidden_features=hidden_dim,
+        #    hidden_layers=num_layers,
+        #    out_features=1 + self.geo_feat_dim,
+        #    spectrum_layer=spectrum_layers,
+        #    use_noise=False,
+        #    outermost_linear=True,
+        #)
+        self.mlp_base = MLPWithHashEncoding(
+            num_levels=16,
+            min_res=16,
+            max_res=2048,
+            log2_hashmap_size=19,
+            features_per_level=2,
+            num_layers=num_layers,
+            layer_width=64,
+            out_dim=1 + self.geo_feat_dim,
+            activation=nn.ReLU(),
+            out_activation=None,
+            implementation="torch",
         )
 
         self.mlp_head = Hybridren(
@@ -94,6 +112,22 @@ class QuantumNerfField(Field):
             use_noise=False,
             outermost_linear=True,
         )
+        
+        #self.direction_encoding = SHEncoding(
+        #    levels=4,
+        #    implementation="torch",
+        #)
+        
+        #print(f"Direction encoding output dim: {self.direction_encoding.get_out_dim()}")
+        #self.mlp_head = MLP(
+        #    in_dim=self.direction_encoding.get_out_dim() + self.geo_feat_dim + self.appearance_embedding_dim,
+        #    num_layers=num_layers_color,
+        #    layer_width=64,
+        #    out_dim=3,
+        #    activation=nn.ReLU(),
+        #    out_activation=nn.Sigmoid(),
+        #    implementation="torch",
+        #)
 
     def get_density(
         self, ray_samples: RaySamples
@@ -124,9 +158,9 @@ class QuantumNerfField(Field):
         positions_flat = positions.view(-1, 3)
 
         assert positions_flat.numel() > 0, "No positions to sample"
-        h = self.mlp_base(positions_flat)[0].view(*ray_samples.frustums.shape, -1)
+        h = self.mlp_base(positions_flat).view(*ray_samples.frustums.shape, -1) # TODO: Remove [0] when classical
         density_before_activation, base_mlp_out = torch.split(h, [1, self.geo_feat_dim], dim=-1)
-        self._density_after_activation = density_before_activation
+        self._density_before_activation = density_before_activation
 
         # Rectifying the density with an exponential is much more stable than a ReLU or
         # softplus, because it enables high post-activation (float32) density outputs
@@ -139,13 +173,13 @@ class QuantumNerfField(Field):
         self, ray_samples: RaySamples, density_embedding: Optional[Tensor] = None
     ) -> Dict[FieldHeadNames, Tensor]:
         assert density_embedding is not None
-
         outputs = {}
         if ray_samples.camera_indices is None:
             raise AttributeError("Ray samples must have camera indices")
         camera_indices = ray_samples.camera_indices.squeeze()
         directions = get_normalized_directions(ray_samples.frustums.directions)
         directions_flat = directions.view(-1, 3)
+        
         outputs_shape = ray_samples.frustums.directions.shape[:-1]
 
         # TODO: (Optional) Add appearance embedding to the field
@@ -165,6 +199,7 @@ class QuantumNerfField(Field):
 
         #print(f"Density shape: {density_embedding.shape}")
         #print(f"Directions flat shape: {directions_flat.shape}")
+        # directions_flat = self.direction_encoding(directions_flat) # TODO: Only when classical, not quantum
         h = torch.cat(
             [
                 directions_flat,
@@ -175,7 +210,7 @@ class QuantumNerfField(Field):
             ),
             dim=1
         )
-        rgb = self.mlp_head(h)[0].view(*outputs_shape, -1).to(directions)
+        rgb = self.mlp_head(h)[0].view(*outputs_shape, -1).to(directions) # TODO: add [0] when quantum
         outputs.update({FieldHeadNames.RGB: rgb})
 
         return outputs
