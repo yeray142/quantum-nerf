@@ -1,34 +1,58 @@
-# nerfstudio-method-template
-Template repository for creating and registering methods in Nerfstudio.
+<p align="center">
+    <br>
+    <h3 align="center">Quantum NeRF</h3>
+    <p align="center">
+        Master's thesis on quantum implicit networks for novel view synthesis
+        <br>
+        <a href="https://github.com/yeray142/QDraw/issues/new?template=bug.md">Report bug</a>
+        ·
+        <a href="https://github.com/yeray142/QDraw/issues/new?template=feature.md&labels=feature">Request feature</a>
+    </p>
+</p>
+
+<!-- TABLE OF CONTENTS -->
+<details>
+  <summary>Table of Contents</summary>
+  <ol>
+    <li><a href="#file-structure">File Structure</a></li>
+    <li><a href="#registering-with-nerfstudio">Registering with Nerfstudio</a></li>
+    <li><a href="#running-q-nerf">Running Q-NeRF</a></li>
+    <li><a href="#license">License</a></li>
+  </ol>
+</details>
 
 ## File Structure
-We recommend the following file structure:
+The project's file structure is organized as follows:
 
 ```
-├── my_method
+├── qnerf/
+│   ├── modules/
+│   │   ├── __init__.py
+│   │   ├── modules.py   
 │   ├── __init__.py
-│   ├── my_config.py
-│   ├── custom_pipeline.py [optional]
-│   ├── custom_model.py [optional]
-│   ├── custom_field.py [optional]
-│   ├── custom_datamanger.py [optional]
-│   ├── custom_dataparser.py [optional]
+│   ├── qnerf.py
+│   ├── qnerf_config.py
+│   ├── qnerf_field.py
 │   ├── ...
 ├── pyproject.toml
 ```
 
 ## Registering with Nerfstudio
-Ensure that nerfstudio has been installed according to the [instructions](https://docs.nerf.studio/en/latest/quickstart/installation.html). Clone or fork this repository and run the commands:
+Ensure that `nerfstudio` has been installed according to the [official installation instructions](https://docs.nerf.studio/en/latest/quickstart/installation.html). Clone or fork this repository and run the commands:
 
 ```
 conda activate nerfstudio
-cd nerfstudio-method-template/
+cd quantum-nerf/
 pip install -e .
 ns-install-cli
 ```
 
-## Running the new method
-This repository creates a new Nerfstudio method named "method-template". To train with it, run the command:
+## Running Q-NeRF
+This repository creates a new Nerfstudio method named `qnerf`. To train with it, run the command:
 ```
-ns-train method-template --data [PATH]
+ns-train qnerf --data [PATH]
 ```
+
+## License
+
+Distributed under the Apache License. See `LICENSE` for more information.
