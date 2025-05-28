@@ -3,6 +3,9 @@ import torch.nn as nn
 import torch
 import math
 import numpy as np
+from sympy.polys.densetools import dmp_integrate_in
+
+
 #import qiskit.providers.aer.noise as noise
 
 
@@ -113,6 +116,170 @@ class Hybridren(nn.Module):
     def forward(self, coords):
         # coords = coords.clone().detach().requires_grad_(True)
         output = self.net(coords)
+        return output, coords
+
+class FGScalingLayer(nn.Module):
+    """
+    FourierGaussian-based scaling layer that projects input coordinates onto weighted Fourier bases.
+
+    The layer:
+    1. Repeats input x ∈ R^{d_in} n times to get x_rep ∈ R^{n*d_in}
+    2. Creates Fourier basis matrix B with elements b_{k,j} = cos(w_f * s_j + φ_p)
+    3. Projects through weighted bases: h_1 = Λ * B * x_rep + b
+
+    Args:
+        d_in (int): Input dimension
+        d_out (int): Output dimension
+        output_dim (int): Dimension of the final output after linear transformation
+        n (int): Number of repetitions for input concatenation
+        F (int): Number of frequencies
+        P (int): Number of phases per frequency
+        gamma (float): Gaussian shaping parameter
+        sampling_range (tuple): Range for sampling s, default (-2π, 2π)
+    """
+    def __init__(self, d_in, d_out, output_dim, n=4, F=8, P=4, gamma=1.0, sampling_range=(-2 * np.pi, 2 * np.pi)):
+        super(FGScalingLayer, self).__init__()
+
+        self.d_in = d_in
+        self.d_out = d_out
+        self.output_dim = output_dim
+        self.n = n
+        self.F = F
+        self.P = P
+        self.gamma = gamma
+
+        # Dimension of the concatenated input
+        self.nd_in = d_in * n
+
+        # Create a frequency array w_f
+        self.w_f = torch.arange(1, F + 1, dtype=torch.float32)
+
+        # Create a phase array φ_p distributed uniformly in [0, 2π)
+        self.phi_p = torch.linspace(0, 2 * np.pi * (P - 1) / P, P, dtype=torch.float32)
+
+        # Create sampling points s
+        self.s_j = torch.linspace(-2 * math.pi, 2 * math.pi, self.nd_in, dtype=torch.float32)
+
+        # Initialize fixed coefficient matrix Λ ∈ R^{d_out × (F×P)}
+        self.Lambda = nn.Parameter(
+            torch.randn(d_out, F * P) * 0.1,
+            requires_grad=False # fixed
+        )
+
+        # Trainable bias parameter
+        self.bias = nn.Parameter(torch.zeros(d_out))
+
+        # Pre-compute Fourier basis matrix B
+        self._build_fourier_basis()
+
+        # Linear layer for frequency spectrum adjustment towards target domain
+        self.linear = nn.Linear(d_out, output_dim)
+
+        # BatchNorm for training stability and convergence acceleration
+        self.batch_norm = nn.BatchNorm1d(output_dim)
+
+
+    def _build_fourier_basis(self):
+        """
+        Build the Fourier basis matrix B with elements:
+        b_{k,j} = cos(w_f * s_j + φ_p) where k = (f-1) × P + p
+        """
+        # Initialize basis matrix B ∈ R^{(F×P) × nd_in}
+        B = torch.zeros(self.F * self.P, self.nd_in)
+
+        # Iterate over frequencies and phases
+        for f in range(self.F):
+            for p in range(self.P):
+                k = f * self.P + p  # k = (f-1) × P + p (adjusted for 0-indexing)
+
+                # Compute b_{k,j} = cos(w_f * s_j + φ_p)
+                w_f = self.w_f[f]
+                phi_p = self.phi_p[p]
+
+                # Broadcasting: w_f * s_j + phi_p for all j
+                B[k, :] = torch.cos(w_f * self.s_j + phi_p)
+
+        # Register as buffer (non-trainable but part of state_dict)
+        self.register_buffer('B', B)
+
+    def forward(self, x):
+        """
+        Forward pass of the Fourier scaling layer.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, d_in)
+
+        Returns:
+            torch.Tensor: Output tensor h_2 of shape (batch_size, d_out)
+        """
+        batch_size = x.shape[0]
+
+        # Step 1: Repeat input n times with concatenation
+        # x_rep ∈ R^{nd_in}
+        x_rep = x.repeat(1, self.n)  # Shape: (batch_size, nd_in)
+
+        # Step 2: Project to Fourier bases
+        # Compute W = ΛB (Fourier-composed filter)
+        W = torch.mm(self.Lambda, self.B)  # Shape: (d_out, nd_in)
+
+        # Step 3: Linear transformation h_1 = ΛBx_rep + b
+        h_1 = torch.mm(x_rep, W.T) + self.bias  # Shape: (batch_size, d_out)
+
+        # Step 4: Apply Gaussian weighting
+        # ε = exp(-γh_1^2)
+        epsilon = torch.exp(-self.gamma * h_1.pow(2))  # Shape: (batch_size, d_out)
+
+        # Step 5: Final output h_2 = εh_1
+        h_2 = epsilon * h_1  # Shape: (batch_size, d_out)
+
+        # Step 6: Apply linear layer and batch normalization
+        linear_out = self.batch_norm(self.linear(h_2)) # Shape: (batch_size, output_dim)
+
+        return linear_out
+
+    def get_fourier_filter(self):
+        """
+        Get the computed Fourier-composed filter W = ΛB.
+
+        Returns:
+            torch.Tensor: Fourier filter of shape (d_out, nd_in)
+        """
+        return torch.mm(self.Lambda, self.B)
+
+    def extra_repr(self):
+        """String representation of the layer."""
+        return (f'd_in={self.d_in}, d_out={self.d_out}, n={self.n}, '
+                f'F={self.F}, P={self.P}, gamma={self.gamma}')
+
+class QFGN(nn.Module):
+    def __init__(self, in_features, hidden_features, out_features, spectrum_layer=1, use_noise=0,
+                 outermost_linear=True):
+        super().__init__()
+
+        # Initialize the Fourier Gaussian scaling
+        self.scaling = FGScalingLayer(
+            d_in=in_features,
+            d_out=hidden_features,
+            output_dim=out_features,
+            n=4,  # Number of repetitions
+            F=8,  # Number of frequencies
+            P=4,  # Number of phases per frequency
+            gamma=0.8,  # Gaussian shaping parameter
+        )
+
+        # Initialize the quantum layer
+        self.qlayer = QuantumLayer(out_features, spectrum_layer, use_noise)
+
+        # If outermost_linear is True, add a final linear layer
+        if outermost_linear:
+            self.qlayer = nn.Sequential(
+                self.qlayer,
+                nn.Linear(out_features, out_features)
+            )
+
+    def forward(self, coords):
+        output = self.scaling(coords)
+        output = self.qlayer(output)
         return output, coords
 
 
