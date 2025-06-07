@@ -80,15 +80,21 @@ class QuantumNerfField(Field):
         self.average_init_density = average_init_density
         self.step = 0
 
-        #self.mlp_base = Hybridren(
-        #    in_features=3,
-        #    hidden_features=hidden_dim,
-        #    hidden_layers=num_layers,
-        #    out_features=1 + self.geo_feat_dim,
-        #    spectrum_layer=spectrum_layers,
-        #    use_noise=False,
-        #    outermost_linear=True,
-        #)
+        """
+        self.mlp_base = Hybridren(
+            in_features=3,
+            hidden_features=hidden_dim,
+            hidden_layers=num_layers,
+            out_features=1 + self.geo_feat_dim,
+            spectrum_layer=spectrum_layers,
+            use_noise=False,
+            outermost_linear=True,
+        )
+        total_params = sum(p.numel() for p in self.mlp_base.parameters() if p.requires_grad)
+        print(f"Parameters Quantum MLP Base: {total_params:,}")
+        """
+        
+        
         self.mlp_base = MLPWithHashEncoding(
             num_levels=16,
             min_res=16,
@@ -102,7 +108,17 @@ class QuantumNerfField(Field):
             out_activation=None,
             implementation="torch",
         )
+        encoder = self.mlp_base.model[0]  # HashEncoding
+        mlp = self.mlp_base.model[1]      # MLP
+        encoder_params = sum(p.numel() for p in encoder.parameters() if p.requires_grad)
+        mlp_params = sum(p.numel() for p in mlp.parameters() if p.requires_grad)
+        total_params = encoder_params + mlp_params
+        print(f"Total mlp_base parameters: {total_params:,}")
+        print(f"    Encoder parameters: {encoder_params:,}")
+        print(f"    MLP parameters: {mlp_params:,}")
+        
 
+        
         self.mlp_head = Hybridren(
             in_features=3 + self.geo_feat_dim + self.appearance_embedding_dim,
             hidden_features=hidden_dim_color,
@@ -112,22 +128,28 @@ class QuantumNerfField(Field):
             use_noise=False,
             outermost_linear=True,
         )
+        total_params = sum(p.numel() for p in self.mlp_head.parameters() if p.requires_grad)
+        print(f"Parameters Quantum MLP Head: {total_params:,}")
         
-        #self.direction_encoding = SHEncoding(
-        #    levels=4,
-        #    implementation="torch",
-        #)
-        
-        #print(f"Direction encoding output dim: {self.direction_encoding.get_out_dim()}")
-        #self.mlp_head = MLP(
-        #    in_dim=self.direction_encoding.get_out_dim() + self.geo_feat_dim + self.appearance_embedding_dim,
-        #    num_layers=num_layers_color,
-        #    layer_width=64,
-        #    out_dim=3,
-        #    activation=nn.ReLU(),
-        #    out_activation=nn.Sigmoid(),
-        #    implementation="torch",
-        #)
+
+        """
+        self.direction_encoding = SHEncoding(
+            levels=4,
+            implementation="torch",
+        )
+        print(f"Direction encoding output dim: {self.direction_encoding.get_out_dim()}")
+        self.mlp_head = MLP(
+            in_dim=self.direction_encoding.get_out_dim() + self.geo_feat_dim + self.appearance_embedding_dim,
+            num_layers=num_layers_color,
+            layer_width=64,
+            out_dim=3,
+            activation=nn.ReLU(),
+            out_activation=nn.Sigmoid(),
+            implementation="torch",
+        )
+        mlp_head_params = sum(p.numel() for p in self.mlp_head.parameters() if p.requires_grad)
+        print(f"Parameters MLP Head: {mlp_head_params:,}")
+        """
 
     def get_density(
         self, ray_samples: RaySamples
@@ -199,7 +221,7 @@ class QuantumNerfField(Field):
 
         #print(f"Density shape: {density_embedding.shape}")
         #print(f"Directions flat shape: {directions_flat.shape}")
-        # directions_flat = self.direction_encoding(directions_flat) # TODO: Only when classical, not quantum
+        #directions_flat = self.direction_encoding(directions_flat) # TODO: Only when classical, not quantum
         h = torch.cat(
             [
                 directions_flat,
