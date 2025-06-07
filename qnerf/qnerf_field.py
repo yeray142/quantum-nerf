@@ -22,7 +22,8 @@ from nerfstudio.field_components.spatial_distortions import SpatialDistortion
 from nerfstudio.field_components.encodings import NeRFEncoding, SHEncoding
 from nerfstudio.fields.base_field import Field, get_normalized_directions  # for custom Field
 
-from qnerf.modules.modules import Hybridren
+from qnerf.components.modules import Hybridren
+from qnerf.components.quantum_mlp import QuantumMLP
 
 
 class QuantumNerfField(Field):
@@ -93,8 +94,21 @@ class QuantumNerfField(Field):
         total_params = sum(p.numel() for p in self.mlp_base.parameters() if p.requires_grad)
         print(f"Parameters Quantum MLP Base: {total_params:,}")
         """
-        
-        
+
+        self.mlp_base = QuantumMLP(
+            in_features=3,
+            hidden_features=hidden_dim,
+            hidden_layers=num_layers,
+            out_features=1 + self.geo_feat_dim,
+            spectrum_layers=spectrum_layers,
+            use_noise=False,
+            mlp_hidden_dim=64,
+            mlp_layers=3
+        )
+        total_params = sum(p.numel() for p in self.mlp_base.parameters() if p.requires_grad)
+        print(f"Parameters Quantum MLP Base: {total_params:,}")
+
+        """
         self.mlp_base = MLPWithHashEncoding(
             num_levels=16,
             min_res=16,
@@ -116,9 +130,9 @@ class QuantumNerfField(Field):
         print(f"Total mlp_base parameters: {total_params:,}")
         print(f"    Encoder parameters: {encoder_params:,}")
         print(f"    MLP parameters: {mlp_params:,}")
-        
+        """
 
-        
+
         self.mlp_head = Hybridren(
             in_features=3 + self.geo_feat_dim + self.appearance_embedding_dim,
             hidden_features=hidden_dim_color,
@@ -130,7 +144,6 @@ class QuantumNerfField(Field):
         )
         total_params = sum(p.numel() for p in self.mlp_head.parameters() if p.requires_grad)
         print(f"Parameters Quantum MLP Head: {total_params:,}")
-        
 
         """
         self.direction_encoding = SHEncoding(
