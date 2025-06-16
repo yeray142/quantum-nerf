@@ -23,7 +23,7 @@ from nerfstudio.field_components.encodings import NeRFEncoding, SHEncoding
 from nerfstudio.fields.base_field import Field, get_normalized_directions  # for custom Field
 
 from qnerf.components.modules import Hybridren
-from qnerf.components.quantum_mlp import QuantumMLP
+from qnerf.components.quantum_mlp import QuantumMLP, QuantumMLPWithHashEncoding
 
 
 class QuantumNerfField(Field):
@@ -50,7 +50,7 @@ class QuantumNerfField(Field):
         self,
         aabb: Tensor,
         num_images: int,
-        num_layers: int = 2, # TODO: 3 for quantum, 2 for classical
+        num_layers: int = 2, # TODO: 3 for quantum, 2 for classical or hybrid
         spectrum_layers: int = 4,
         hidden_dim: int = 8,
         geo_feat_dim: int = 5,
@@ -94,7 +94,7 @@ class QuantumNerfField(Field):
         total_params = sum(p.numel() for p in self.mlp_base.parameters() if p.requires_grad)
         print(f"Parameters Quantum MLP Base: {total_params:,}")
         """
-
+        """
         self.mlp_base = QuantumMLP(
             in_features=3,
             hidden_features=hidden_dim,
@@ -107,16 +107,29 @@ class QuantumNerfField(Field):
         )
         total_params = sum(p.numel() for p in self.mlp_base.parameters() if p.requires_grad)
         print(f"Parameters Quantum MLP Base: {total_params:,}")
-
         """
+        """
+        self.mlp_base = QuantumMLPWithHashEncoding(
+            hidden_features=hidden_dim,
+            hidden_layers=num_layers,
+            out_features=1 + self.geo_feat_dim,
+            spectrum_layers=spectrum_layers,
+            use_noise=False,
+            mlp_hidden_dim=64,
+            mlp_layers=1
+        )
+        total_params = sum(p.numel() for p in self.mlp_base.parameters() if p.requires_grad)
+        print(f"Parameters Quantum MLP Base: {total_params:,}")
+        """
+        
         self.mlp_base = MLPWithHashEncoding(
             num_levels=16,
             min_res=16,
             max_res=2048,
             log2_hashmap_size=19,
             features_per_level=2,
-            num_layers=num_layers,
-            layer_width=64,
+            num_layers=num_layers, # num_layers if original, 6 if fair
+            layer_width=64, # 64 if original, 10 if fair
             out_dim=1 + self.geo_feat_dim,
             activation=nn.ReLU(),
             out_activation=None,
@@ -130,9 +143,8 @@ class QuantumNerfField(Field):
         print(f"Total mlp_base parameters: {total_params:,}")
         print(f"    Encoder parameters: {encoder_params:,}")
         print(f"    MLP parameters: {mlp_params:,}")
+
         """
-
-
         self.mlp_head = Hybridren(
             in_features=3 + self.geo_feat_dim + self.appearance_embedding_dim,
             hidden_features=hidden_dim_color,
@@ -144,8 +156,9 @@ class QuantumNerfField(Field):
         )
         total_params = sum(p.numel() for p in self.mlp_head.parameters() if p.requires_grad)
         print(f"Parameters Quantum MLP Head: {total_params:,}")
-
         """
+
+        
         self.direction_encoding = SHEncoding(
             levels=4,
             implementation="torch",
@@ -153,8 +166,8 @@ class QuantumNerfField(Field):
         print(f"Direction encoding output dim: {self.direction_encoding.get_out_dim()}")
         self.mlp_head = MLP(
             in_dim=self.direction_encoding.get_out_dim() + self.geo_feat_dim + self.appearance_embedding_dim,
-            num_layers=num_layers_color,
-            layer_width=64,
+            num_layers=7, # num_layers_color for original, 7 if fair
+            layer_width=10, # 64 for original, 10 for fair
             out_dim=3,
             activation=nn.ReLU(),
             out_activation=nn.Sigmoid(),
@@ -162,7 +175,7 @@ class QuantumNerfField(Field):
         )
         mlp_head_params = sum(p.numel() for p in self.mlp_head.parameters() if p.requires_grad)
         print(f"Parameters MLP Head: {mlp_head_params:,}")
-        """
+        
 
     def get_density(
         self, ray_samples: RaySamples
@@ -234,7 +247,7 @@ class QuantumNerfField(Field):
 
         #print(f"Density shape: {density_embedding.shape}")
         #print(f"Directions flat shape: {directions_flat.shape}")
-        #directions_flat = self.direction_encoding(directions_flat) # TODO: Only when classical, not quantum
+        directions_flat = self.direction_encoding(directions_flat) # TODO: Only when classical, not quantum
         h = torch.cat(
             [
                 directions_flat,
@@ -245,7 +258,7 @@ class QuantumNerfField(Field):
             ),
             dim=1
         )
-        rgb = self.mlp_head(h)[0].view(*outputs_shape, -1).to(directions) # TODO: add [0] when quantum
+        rgb = self.mlp_head(h).view(*outputs_shape, -1).to(directions) # TODO: add [0] when quantum
         outputs.update({FieldHeadNames.RGB: rgb})
 
         return outputs
