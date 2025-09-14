@@ -10,6 +10,9 @@
     </p>
 </p>
 
+> [!IMPORTANT] 
+> An example of an output 3D model, in PLY format, of our Q-NeRF model is available [here](https://uab-my.sharepoint.com/:u:/g/personal/1599053_uab_cat/EWbZ6rLq7uFBnm10yovLdAEB0UKlvvvOpcrbjNNliIBWcQ?e=miACOL). The presentation slides of this project's defense are also available in [Google Slides](https://docs.google.com/presentation/d/1h5BU7KHyIiEkdW8fUPBftrJmw5uFxWxlf_PqYwYgbPc/edit?usp=sharing).
+
 <!-- TABLE OF CONTENTS -->
 <details>
   <summary>Table of Contents</summary>
